@@ -1,0 +1,50 @@
+# ───────────────────────────────────────────────────────────────────────────
+#  k8s/hpa.yaml
+#  Horizontal Pod Autoscaler for Flask Visitor Counter
+# ───────────────────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flask-hpa
+spec:
+  # Which Deployment to scale
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: flask-visitor-counter
+
+  # Replica boundaries
+  minReplicas: 2    # always keep at least 2 pods (high availability)
+  maxReplicas: 6    # never exceed 6 pods (cost control)
+
+  metrics:
+  # Scale up when average CPU across all pods exceeds 50%
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50   # 50% of the requested CPU (100m)
+
+  # Optional: also scale on memory (comment out if Metrics Server doesn't support)
+  # - type: Resource
+  #   resource:
+  #     name: memory
+  #     target:
+  #       type: Utilization
+  #       averageUtilization: 70
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30    # react quickly to spikes
+      policies:
+      - type: Pods
+        value: 2                        # add at most 2 pods per scale event
+        periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 60   # cool-down before removing pods
+      policies:
+      - type: Pods
+        value: 1                        # remove at most 1 pod at a time
+        periodSeconds: 60

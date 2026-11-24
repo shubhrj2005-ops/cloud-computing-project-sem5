@@ -1,0 +1,65 @@
+# ───────────────────────────────────────────────────────────────────────────
+#  docker-compose.yml – Flask Visitor Counter
+#  Run with:  docker-compose up --build
+# ───────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+
+  # ── Redis ──────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: visitor-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data           # persistent storage for Redis data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+  # ── Flask application ───────────────────────────────────────────────────
+  flask-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visitor-flask
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      REDIS_HOST: redis              # resolves to the redis service above
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      APP_TITLE: "Cloud Visitor Counter"
+      FLASK_PORT: 5000
+    depends_on:
+      redis:
+        condition: service_healthy   # wait until Redis passes its healthcheck
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - app-network
+
+# ── Volumes ──────────────────────────────────────────────────────────────
+volumes:
+  redis_data:
+    driver: local
+
+# ── Networks ─────────────────────────────────────────────────────────────
+networks:
+  app-network:
+    driver: bridge

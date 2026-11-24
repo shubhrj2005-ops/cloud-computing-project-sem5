@@ -1,0 +1,93 @@
+# ───────────────────────────────────────────────────────────────────────────
+#  k8s/flask-deployment.yaml
+#  Flask Visitor Counter – Kubernetes Deployment + Service
+# ───────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-visitor-counter
+  labels:
+    app: flask-visitor-counter
+    tier: frontend
+spec:
+  replicas: 2                       # Start with exactly 2 replicas as required
+  selector:
+    matchLabels:
+      app: flask-visitor-counter
+  template:
+    metadata:
+      labels:
+        app: flask-visitor-counter
+        tier: frontend
+    spec:
+      containers:
+      - name: flask-app
+        image: visitor-counter:latest        # built locally via minikube image load
+        imagePullPolicy: Never               # use local image (Minikube)
+        ports:
+        - containerPort: 5000
+        env:
+        - name: REDIS_HOST
+          value: "redis-service"             # Kubernetes service DNS name
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_DB
+          value: "0"
+        - name: APP_TITLE
+          value: "Cloud Visitor Counter"
+        - name: FLASK_PORT
+          value: "5000"
+
+        # ── Resource requests & limits ──────────────────────────────────
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"            # 100 milli-CPUs requested
+          limits:
+            memory: "128Mi"
+            cpu: "250m"            # hard cap to trigger HPA scaling
+
+        # ── Liveness probe ──────────────────────────────────────────────
+        # Kubernetes kills and restarts the pod if this fails
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # ── Readiness probe ─────────────────────────────────────────────
+        # Traffic is only sent to this pod when it is "ready"
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+---
+# ───────────────────────────────────────────────────────────────────────────
+#  Flask Service – exposes Flask pods inside the cluster (and externally via
+#  NodePort so we can access it from our Windows host through Minikube)
+# ───────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-service
+  labels:
+    app: flask-visitor-counter
+spec:
+  type: NodePort
+  selector:
+    app: flask-visitor-counter
+  ports:
+  - port: 80              # cluster-internal port
+    targetPort: 5000      # Flask container port
+    nodePort: 30000       # fixed NodePort (access via minikube ip:30000)
+    protocol: TCP

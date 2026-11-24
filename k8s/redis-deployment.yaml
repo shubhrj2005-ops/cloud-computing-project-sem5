@@ -1,0 +1,102 @@
+# ───────────────────────────────────────────────────────────────────────────
+#  k8s/redis-deployment.yaml
+#  Redis – Kubernetes Deployment + Service + PVC
+# ───────────────────────────────────────────────────────────────────────────
+
+# ── Persistent Volume Claim for Redis data ──────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce            # one node can mount at a time (standard for Redis)
+  resources:
+    requests:
+      storage: 256Mi         # 256 MB is plenty for a demo
+
+---
+# ── Redis Deployment ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+    tier: backend
+spec:
+  replicas: 1                # Redis is stateful; keep it at 1 replica
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        tier: backend
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.2-alpine
+        ports:
+        - containerPort: 6379
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - 128mb
+        - --maxmemory-policy
+        - allkeys-lru
+
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+
+        # Mount the persistent volume into /data (Redis default data dir)
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+
+        livenessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+      volumes:
+      - name: redis-storage
+        persistentVolumeClaim:
+          claimName: redis-pvc
+
+---
+# ── Redis Service (ClusterIP) ────────────────────────────────────────────────
+# Flask pods reach Redis using the DNS name "redis-service" inside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  labels:
+    app: redis
+spec:
+  type: ClusterIP              # internal only – Redis should not be public
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
